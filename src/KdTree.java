@@ -20,8 +20,9 @@ public class KdTree {
         }
     }
 
-    private final int KEY_X = 1, KEY_Y = -1;
+    private final int PARTITION_X = 1, PARTITION_Y = -1;
     private Node root;
+    private RectHV rootRect = new RectHV(0, 0, 1, 1);
 
     public boolean isEmpty() {
         return size() == 0;
@@ -41,46 +42,27 @@ public class KdTree {
         if (p == null) throw new IllegalArgumentException("calls put() with a null key");
 
         if (contains(p)) return; // If duplicated
-        root = put(root, KEY_X, p, new RectHV(0.0, 0.0, 1.0, 1.0));
+        root = put(root, PARTITION_X, p, rootRect);
     }
 
-    private Node put(Node x, int key, Point2D p, RectHV pRect) {
-        if (x == null) return new Node(p, pRect, 1);
+    private Node put(Node x, int partition, Point2D p, RectHV rect) {
+        if (x == null) return new Node(p, rect, 1);
 
         // Select subtree by comparing x or y keys
         int cmp;
-        RectHV xRect = x.rect;
-        Point2D xP = x.p;
-
-        double xmin, ymin, xmax, ymax;
-        xmin = xRect.xmin();
-        ymin = xRect.ymin();
-        xmax = xRect.xmax();
-        ymax = xRect.ymax();
-
-        if (key == KEY_X) {
+        double xmin = x.rect.xmin(), ymin = x.rect.ymin(), xmax = x.rect.xmax(), ymax = x.rect.ymax();
+        if (partition == PARTITION_X) {
             cmp = Double.compare(p.x(), x.p.x());
-            if (cmp < 0) {
-                pRect = new RectHV(xmin, ymin, xP.x(), ymax);
-                x.lb = put(x.lb, KEY_Y, p, pRect);
-            } else {
-                pRect = new RectHV(xP.x(), ymin, xmax, ymax);
-                x.rt = put(x.rt, KEY_Y, p, pRect);
-            }
+            if (cmp < 0) x.lb = put(x.lb, PARTITION_Y, p, new RectHV(xmin, ymin, x.p.x(), ymax));
+            else x.rt = put(x.rt, PARTITION_Y, p, new RectHV(x.p.x(), ymin, xmax, ymax));
         } else {
             cmp = Double.compare(p.y(), x.p.y());
-            if (cmp < 0) {
-                pRect = new RectHV(xmin, ymin, xmax, xP.y());
-                x.lb = put(x.lb, KEY_X, p, pRect);
-            } else {
-                pRect = new RectHV(xmin, xP.y(), xmax, ymax);
-                x.rt = put(x.rt, KEY_X, p, pRect);
-            }
+            if (cmp < 0) x.lb = put(x.lb, PARTITION_X, p, new RectHV(xmin, ymin, xmax, x.p.y()));
+            else x.rt = put(x.rt, PARTITION_X, p, new RectHV(xmin, x.p.y(), xmax, ymax));
         }
 
         x.size = 1 + size(x.lb) + size(x.rt);
         return x;
-
     }
 
     private RectHV get(Node x, int key, Point2D p) {
@@ -90,20 +72,20 @@ public class KdTree {
 
         // Search subtrees
         int cmp;
-        if (key == KEY_X) {
+        if (key == PARTITION_X) {
             cmp = Double.compare(p.x(), x.p.x());
-            if (cmp < 0) return get(x.lb, KEY_Y, p);
-            else return get(x.rt, KEY_Y, p);
+            if (cmp < 0) return get(x.lb, PARTITION_Y, p);
+            else return get(x.rt, PARTITION_Y, p);
         } else {
             cmp = Double.compare(p.y(), x.p.y());
-            if (cmp < 0) return get(x.lb, KEY_X, p);
-            else return get(x.rt, KEY_X, p);
+            if (cmp < 0) return get(x.lb, PARTITION_X, p);
+            else return get(x.rt, PARTITION_X, p);
         }
 
     }
 
     private RectHV get(Point2D p) {
-        return get(root, KEY_X, p);
+        return get(root, PARTITION_X, p);
     }
 
     public boolean contains(Point2D p)            // does the set contain point p?
@@ -130,41 +112,44 @@ public class KdTree {
         return nearest(root, p, Double.POSITIVE_INFINITY);
     }
 
-    private Point2D nearest(Node x, Point2D p, double currentDisMin) {
+    private Point2D nearest(Node x, Point2D p, double currentDis) {
         if (x == null) return null;
 
         double disToRect = x.rect.distanceTo(p);
-        if (disToRect > currentDisMin) return null;
+        if (disToRect > currentDis) return null;
 
-        Point2D nrL, nrR;
-        double nrLD = Double.POSITIVE_INFINITY;
-        double nrRD = Double.POSITIVE_INFINITY;
+        Point2D left, right;
+        double leftDis = Double.POSITIVE_INFINITY, rightDis = Double.POSITIVE_INFINITY;
 
-        Point2D nr = x.p;
-        double nrD = nr.distanceTo(p);
-        if (currentDisMin > nrD) currentDisMin = nrD;
+        // Nearest point to be x
+        Point2D nearest = x.p;
+        double nearestDis = nearest.distanceTo(p);
 
+        /**
+         * TODO: search the same side with p first
+         */
         // Nearest point of left subtree
-        nrL = nearest(x.lb, p, currentDisMin);
-        if(nrL != null) nrLD = nrL.distanceTo(p);
+        currentDis = Double.min(currentDis, nearestDis);
+        left = nearest(x.lb, p, currentDis);
+        if(left != null) leftDis = left.distanceTo(p);
 
         // Nearest point of right subtree
-        if (currentDisMin > nrLD) currentDisMin = nrLD;
-        nrR = nearest(x.rt, p, currentDisMin);
-        if (nrR != null) nrRD = nrR.distanceTo(p);
+        currentDis = Double.min(currentDis, leftDis);
+        right = nearest(x.rt, p, currentDis);
+        if (right != null) rightDis = right.distanceTo(p);
 
-        // Decide nearest point of the tree
-        if (nrLD < nrD) {
-            nrD = nrLD;
-            nr = nrL;
+        // Decide nearest point of the tree among x, left, right
+        if (leftDis < nearestDis) {
+            nearestDis = leftDis;
+            nearest = left;
         }
 
-        if (nrRD < nrD) {
-            nrD = nrRD;
-            nr = nrR;
+        if (rightDis < nearestDis) {
+            nearestDis = rightDis;
+            nearest = right;
         }
 
-        return nr;
+        return nearest;
     }
 
     private LinkedList<Point2D> range(Node x, RectHV rect) {
